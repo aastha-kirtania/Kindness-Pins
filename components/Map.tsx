@@ -92,6 +92,34 @@ function AddPin({ onAdd }: { onAdd: (pin: any) => void }) {
 
 export default function Map({ pins }: { pins: any[] }) {
   const [localPins, setLocalPins] = useState(pins)
+    useEffect(() => {
+    const channel = supabase
+      .channel("pins-changes")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "pins" },
+        (payload) => {
+         if (payload.eventType === "INSERT") {
+  setLocalPins((prev) => {
+    const exists = prev.find((p) => p.id === payload.new.id)
+    if (exists) return prev
+    return [...prev, payload.new]
+  })}
+
+
+          if (payload.eventType === "DELETE") {
+            setLocalPins((prev) =>
+              prev.filter((pin) => pin.id !== payload.old.id)
+            )
+          }
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [])
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null)
   const [notifiedPins, setNotifiedPins] = useState<string[]>([])
 
