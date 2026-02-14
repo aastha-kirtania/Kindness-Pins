@@ -7,6 +7,7 @@ import {
   Popup,
   useMapEvents,
   Circle,
+  useMap,
 } from "react-leaflet"
 import L from "leaflet"
 import "leaflet/dist/leaflet.css"
@@ -14,7 +15,7 @@ import { createClient } from "@supabase/supabase-js"
 import { useState, useEffect } from "react"
 import toast from "react-hot-toast"
 
-// Fix default marker icons
+// ✅ Fix default marker icons
 delete (L.Icon.Default.prototype as any)._getIconUrl
 L.Icon.Default.mergeOptions({
   iconRetinaUrl:
@@ -25,13 +26,13 @@ L.Icon.Default.mergeOptions({
     "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
 })
 
+// ✅ Supabase Client
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
-
-// 📏 Distance Calculator (Haversine Formula)
+// 📏 Distance Calculator
 function getDistance(
   [lat1, lng1]: [number, number],
   [lat2, lng2]: [number, number]
@@ -51,8 +52,7 @@ function getDistance(
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
-
-// 📍 Component for Adding Pins
+// 📍 Add Pin Component
 function AddPin({ onAdd }: { onAdd: (pin: any) => void }) {
   useMapEvents({
     async click(e) {
@@ -89,23 +89,39 @@ function AddPin({ onAdd }: { onAdd: (pin: any) => void }) {
   return null
 }
 
+// 📍 Auto Center Component
+function RecenterMap({ location }: { location: [number, number] | null }) {
+  const map = useMap()
+
+  useEffect(() => {
+    if (location) {
+      map.setView(location, 17)
+    }
+  }, [location, map])
+
+  return null
+}
 
 export default function Map({ pins }: { pins: any[] }) {
   const [localPins, setLocalPins] = useState(pins)
-    useEffect(() => {
+  const [userLocation, setUserLocation] = useState<[number, number] | null>(null)
+  const [notifiedPins, setNotifiedPins] = useState<string[]>([])
+
+  // ✅ Realtime Sync
+  useEffect(() => {
     const channel = supabase
       .channel("pins-changes")
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "pins" },
         (payload) => {
-         if (payload.eventType === "INSERT") {
-  setLocalPins((prev) => {
-    const exists = prev.find((p) => p.id === payload.new.id)
-    if (exists) return prev
-    return [...prev, payload.new]
-  })}
-
+          if (payload.eventType === "INSERT") {
+            setLocalPins((prev) => {
+              const exists = prev.find((p) => p.id === payload.new.id)
+              if (exists) return prev
+              return [...prev, payload.new]
+            })
+          }
 
           if (payload.eventType === "DELETE") {
             setLocalPins((prev) =>
@@ -120,26 +136,6 @@ export default function Map({ pins }: { pins: any[] }) {
       supabase.removeChannel(channel)
     }
   }, [])
-  const [userLocation, setUserLocation] = useState<[number, number] | null>(null)
-  const [notifiedPins, setNotifiedPins] = useState<string[]>([])
-
-  // ➕ Add pin to local state
-  const handleAddPin = (pin: any) => {
-    setLocalPins((prev) => [...prev, pin])
-  }
-
-  // ❌ Delete pin
-  const handleDelete = async (id: string) => {
-    const { error } = await supabase.from("pins").delete().eq("id", id)
-
-    if (error) {
-      toast.error("Failed to delete pin")
-      console.error(error)
-    } else {
-      setLocalPins((prev) => prev.filter((pin) => pin.id !== id))
-      toast.success("Pin deleted")
-    }
-  }
 
   // 📡 Track user location
   useEffect(() => {
@@ -157,15 +153,12 @@ export default function Map({ pins }: { pins: any[] }) {
     )
   }, [])
 
-  // 🔔 Check proximity & trigger notification
+  // 🔔 Proximity Notification
   useEffect(() => {
     if (!userLocation) return
 
     localPins.forEach((pin: any) => {
-      const distance = getDistance(userLocation, [
-        pin.lat,
-        pin.lng,
-      ])
+      const distance = getDistance(userLocation, [pin.lat, pin.lng])
 
       if (
         distance <= (pin.radius || 30) &&
@@ -179,6 +172,19 @@ export default function Map({ pins }: { pins: any[] }) {
     })
   }, [userLocation, localPins])
 
+  // ❌ Delete Pin
+  const handleDelete = async (id: string) => {
+    const { error } = await supabase.from("pins").delete().eq("id", id)
+
+    if (error) {
+      toast.error("Failed to delete pin")
+      console.error(error)
+    } else {
+      setLocalPins((prev) => prev.filter((pin) => pin.id !== id))
+      toast.success("Pin deleted")
+    }
+  }
+
   return (
     <MapContainer
       center={[16.4632075, 80.5064032]}
@@ -190,16 +196,23 @@ export default function Map({ pins }: { pins: any[] }) {
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
 
-      <AddPin onAdd={handleAddPin} />
+      <AddPin onAdd={() => {}} />
 
+      {/* ✅ Auto Center */}
+      {userLocation && <RecenterMap location={userLocation} />}
+
+      {/* ✅ User Marker */}
+      {userLocation && (
+        <Marker position={userLocation}>
+          <Popup>You are here 📍</Popup>
+        </Marker>
+      )}
+
+      {/* ✅ Pins */}
       {localPins.map((pin: any) => (
-        <Marker
-          key={pin.id}
-          position={[pin.lat, pin.lng]}
-        >
+        <Marker key={pin.id} position={[pin.lat, pin.lng]}>
           <Popup>
             <p>{pin.message}</p>
-
             <button
               onClick={() => handleDelete(pin.id)}
               className="mt-2 text-red-600 text-sm"
@@ -210,6 +223,7 @@ export default function Map({ pins }: { pins: any[] }) {
         </Marker>
       ))}
 
+      {/* ✅ Circles */}
       {localPins.map((pin: any) => (
         <Circle
           key={`circle-${pin.id}`}
