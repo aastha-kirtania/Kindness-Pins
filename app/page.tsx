@@ -10,7 +10,7 @@ export default function Home() {
       </h1>
 
       <p className="text-center max-w-lg text-purple-700 mb-8">
-        Discover and leave anonymous messages of positivity across campus.
+        Discover and leave anonymous messages of positivity across the world!
         Spread kindness wherever you go.
       </p>
 
