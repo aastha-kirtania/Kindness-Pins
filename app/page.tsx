@@ -5,7 +5,7 @@ import Link from "next/link"
 export default function Home() {
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-b from-purple-200 to-indigo-200 p-4">
-      <h1 className="text-5xl font-bold text-purple-800 mb-6">
+      <h1 className="text-5xl font-bold text-purple-800 mb-6 text-center">
         Kindness Pins 🌟
       </h1>
 

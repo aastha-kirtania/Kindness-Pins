@@ -15,7 +15,7 @@ import { createClient } from "@supabase/supabase-js"
 import { useState, useEffect } from "react"
 import toast from "react-hot-toast"
 
-// Fix default marker icons
+// ------------------- Fix default marker icons -------------------
 delete (L.Icon.Default.prototype as any)._getIconUrl
 L.Icon.Default.mergeOptions({
   iconRetinaUrl:
@@ -26,12 +26,22 @@ L.Icon.Default.mergeOptions({
     "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
 })
 
+// ------------------- Supabase client -------------------
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
-// Haversine formula to calculate distance in meters
+// ------------------- Types -------------------
+interface Pin {
+  id: string
+  lat: number
+  lng: number
+  message: string
+  radius?: number
+}
+
+// ------------------- Haversine formula -------------------
 function getDistance(
   [lat1, lng1]: [number, number],
   [lat2, lng2]: [number, number]
@@ -49,27 +59,23 @@ function getDistance(
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
-// Auto-center map to user location
+// ------------------- Auto-center map -------------------
 function AutoCenter({ position }: { position: [number, number] | null }) {
   const map = useMap()
   useEffect(() => {
-    if (position) {
-      map.setView(position, map.getZoom(), { animate: true })
-    }
+    if (position) map.setView(position, map.getZoom(), { animate: true })
   }, [position, map])
   return null
 }
 
-// Component to add pins
-function AddPin({ onAdd }: { onAdd: (pin: any) => void }) {
+// ------------------- AddPin Component -------------------
+function AddPin({ onAdd }: { onAdd: (pin: Pin) => void }) {
   useMapEvents({
     async click(e) {
       const message = prompt("Enter your message for this location:")
       if (!message) return
 
-      const radiusStr = prompt(
-        "Enter visibility radius in meters (optional, default 30m):"
-      )
+      const radiusStr = prompt("Enter visibility radius in meters (default 30):")
       const radius = radiusStr ? parseInt(radiusStr) : 30
 
       const { data, error } = await supabase
@@ -82,94 +88,60 @@ function AddPin({ onAdd }: { onAdd: (pin: any) => void }) {
         console.error(error)
       } else {
         toast.success("Pin added!")
-        onAdd(data[0])
+        onAdd(data[0] as Pin)
       }
     },
   })
   return null
 }
 
-// Main Map Component
-export default function Map({ pins }: { pins: any[] }) {
-  const [localPins, setLocalPins] = useState(pins)
+// ------------------- Main Map Component -------------------
+export default function Map({ pins }: { pins: Pin[] }) {
+  const [localPins, setLocalPins] = useState<Pin[]>(pins)
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null)
   const [notifiedPins, setNotifiedPins] = useState<string[]>([])
 
-  // Subscribe to Supabase real-time changes
-// Real-time updates from Supabase
-useEffect(() => {
-  // Create channel
-  const channel = supabase
-    .channel("pins-changes")
-    .on(
-      "postgres_changes",
-      { event: "*", schema: "public", table: "pins" },
-      (payload) => {
-        if (payload.eventType === "INSERT") {
-          setLocalPins((prev) => {
-            const exists = prev.find((p) => p.id === payload.new.id)
-            if (exists) return prev
-            return [...prev, payload.new]
-          })
+  // ------------------- Real-time Supabase subscription -------------------
+  useEffect(() => {
+    const channel = supabase
+      .channel("pins-changes")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "pins" },
+        (payload) => {
+          if (payload.eventType === "INSERT") {
+            setLocalPins((prev) => {
+              if (prev.find((p) => p.id === payload.new.id)) return prev
+              return [...prev, payload.new as Pin]
+            })
+          }
+          if (payload.eventType === "DELETE") {
+            setLocalPins((prev) =>
+              prev.filter((pin) => pin.id !== payload.old.id)
+            )
+          }
         }
+      )
+      .subscribe()
 
-        if (payload.eventType === "DELETE") {
-          setLocalPins((prev) =>
-            prev.filter((pin) => pin.id !== payload.old.id)
-          )
-        }
-      }
-    )
-    .subscribe()
-
-  // Cleanup synchronously
-  return () => {
-    supabase.removeChannel(channel)
-  }
-}, [])
-
-// Track user location
-useEffect(() => {
-  const watcher = navigator.geolocation.watchPosition(
-    (pos) => setUserLocation([pos.coords.latitude, pos.coords.longitude]),
-    (err) => console.error("Location error:", err),
-    { enableHighAccuracy: true }
-  )
-
-  // Cleanup: stop watching location
-  return () => navigator.geolocation.clearWatch(watcher)
-}, [])
-
-// Trigger notification if entering a pin's radius
-useEffect(() => {
-  if (!userLocation) return
-
-  localPins.forEach((pin: any) => {
-    const distance = getDistance(userLocation, [pin.lat, pin.lng])
-    if (distance <= (pin.radius || 30) && !notifiedPins.includes(pin.id)) {
-      toast.success(`💌 Nearby message: "${pin.message}"`)
-      setNotifiedPins((prev) => [...prev, pin.id])
+    return () => {
+      supabase.removeChannel(channel)
     }
-  })
-  // No cleanup needed
-}, [userLocation, localPins, notifiedPins])
+  }, [])
 
-  // Track user location
+  // ------------------- Track user location -------------------
   useEffect(() => {
     const watchId = navigator.geolocation.watchPosition(
-      (pos) =>
-        setUserLocation([pos.coords.latitude, pos.coords.longitude]),
+      (pos) => setUserLocation([pos.coords.latitude, pos.coords.longitude]),
       (err) => console.error("Location error:", err),
       { enableHighAccuracy: true }
     )
-
     return () => navigator.geolocation.clearWatch(watchId)
   }, [])
 
-  // Trigger notification for pins in range
+  // ------------------- Notify user when entering a pin radius -------------------
   useEffect(() => {
     if (!userLocation) return
-
     localPins.forEach((pin) => {
       const distance = getDistance(userLocation, [pin.lat, pin.lng])
       if (distance <= (pin.radius || 30) && !notifiedPins.includes(pin.id)) {
@@ -179,10 +151,8 @@ useEffect(() => {
     })
   }, [userLocation, localPins, notifiedPins])
 
-  // Add pin locally
-  const handleAddPin = (pin: any) => setLocalPins((prev) => [...prev, pin])
-
-  // Delete pin
+  // ------------------- Add/Delete pins -------------------
+  const handleAddPin = (pin: Pin) => setLocalPins((prev) => [...prev, pin])
   const handleDelete = async (id: string) => {
     const { error } = await supabase.from("pins").delete().eq("id", id)
     if (error) toast.error("Failed to delete pin")
@@ -192,16 +162,14 @@ useEffect(() => {
     }
   }
 
-  // Show only pins within user's radius
-  const visiblePins = localPins.filter((pin) => {
-    if (!userLocation) return false
-    const distance = getDistance(userLocation, [pin.lat, pin.lng])
-    return distance <= (pin.radius || 30)
-  })
+  // ------------------- Visible pins -------------------
+  const visiblePins = localPins.filter((pin) =>
+    userLocation ? getDistance(userLocation, [pin.lat, pin.lng]) <= (pin.radius || 30) : true
+  )
 
   return (
     <MapContainer
-      center={[16.4632075, 80.5064032]}
+      center={userLocation || [16.4632075, 80.5064032]}
       zoom={17}
       style={{ height: "100vh", width: "100%" }}
     >
@@ -213,14 +181,14 @@ useEffect(() => {
       <AddPin onAdd={handleAddPin} />
       <AutoCenter position={userLocation} />
 
-      {/* Show user location */}
+      {/* User location */}
       {userLocation && (
         <Marker position={userLocation}>
           <Popup>You are here</Popup>
         </Marker>
       )}
 
-      {/* Pins visible to the user */}
+      {/* Pins */}
       {visiblePins.map((pin) => (
         <Marker key={pin.id} position={[pin.lat, pin.lng]}>
           <Popup>
@@ -235,6 +203,7 @@ useEffect(() => {
         </Marker>
       ))}
 
+      {/* Pin radius circles */}
       {visiblePins.map((pin) => (
         <Circle
           key={`circle-${pin.id}`}
